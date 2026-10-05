@@ -1,0 +1,61 @@
+# AgeCare · Consola de administración — proyecto completo en Docker (Hito 2)
+#   docker compose up --build
+#   Consola:  http://localhost:8080   (admin@wellq.co.uk / Admin123!)
+#   API:      http://localhost:8080/api/v1/admin/docs
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agecare
+      POSTGRES_PASSWORD: agecare
+      POSTGRES_DB: agecare_admin
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agecare -d agecare_admin"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./agecare-admin-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: &api-env
+      ADMIN_DATABASE_URL: postgresql+asyncpg://agecare:agecare@db:5432/agecare_admin
+      ADMIN_JWT_SECRET: solo-para-desarrollo-cambiar-0123456789
+      ADMIN_APP_JWT_SECRET: solo-para-desarrollo-app-0123456789
+      ADMIN_BILLING_GATEWAY: fake
+      ADMIN_PUBLIC_BASE_URL: http://localhost:8080
+      ADMIN_BILLING_RETURN_URL: http://localhost:8080/checkout/resultado
+      ADMIN_CORS_ORIGINS: http://localhost:8080
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m scripts.seed &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  billing-cycle:
+    # Job de facturación cada 15 minutos (en Vercel: Cron diario; en Azure: Container Apps Job)
+    build: ./agecare-admin-api
+    depends_on:
+      api:
+        condition: service_healthy
+    environment: *api-env
+    command: sh -c "while true; do python -m scripts.billing_cycle; sleep 900; done"
+
+  web:
+    build: ./agecare-admin-web
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:

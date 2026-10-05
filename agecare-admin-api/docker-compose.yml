@@ -1,0 +1,50 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agecare
+      POSTGRES_PASSWORD: agecare
+      POSTGRES_DB: agecare_admin
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agecare -d agecare_admin"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  billing-cycle:
+    # Job de facturación cada 15 min (en Azure: Container Apps Job con cron */15)
+    build: .
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      ADMIN_DATABASE_URL: postgresql+asyncpg://agecare:agecare@db:5432/agecare_admin
+      ADMIN_BILLING_GATEWAY: fake
+    command: >
+      sh -c "while true; do python -m scripts.billing_cycle; sleep 900; done"
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ADMIN_DATABASE_URL: postgresql+asyncpg://agecare:agecare@db:5432/agecare_admin
+      ADMIN_JWT_SECRET: solo-para-desarrollo
+      ADMIN_BILLING_GATEWAY: fake            # transbank para usar el ambiente de integración real
+      ADMIN_APP_JWT_SECRET: solo-para-desarrollo-app
+      ADMIN_PUBLIC_BASE_URL: http://localhost:8000
+      ADMIN_BILLING_RETURN_URL: http://localhost:5173/checkout/resultado
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m scripts.seed &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+volumes:
+  pgdata:
