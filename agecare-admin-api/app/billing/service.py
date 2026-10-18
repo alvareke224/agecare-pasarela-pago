@@ -74,6 +74,15 @@ class BillingService:
     def now(self) -> datetime:
         return self._now or now_utc()
 
+    def gw_for(self, provider: str | None) -> PaymentGateway:
+        """Pasarela que corresponde a un medio de pago (datos demo del seed → simulador)."""
+        for_provider = getattr(self.gw, "for_provider", None)
+        return for_provider(provider) if for_provider else self.gw
+
+    async def gw_for_charge(self, charge: Charge) -> PaymentGateway:
+        pm = await self.db.get(PaymentMethod, charge.payment_method_id)
+        return self.gw_for(pm.provider if pm else None)
+
     # ================================================================ utilidades
     async def plan_price(self, plan: PlanCode) -> int:
         setting = await self.db.get(core_models.SystemSetting, "plan_prices")
@@ -178,7 +187,7 @@ class BillingService:
             self._fail_inscription(pm, PaymentMethodStatus.aborted, "TBK_ABORTED")
             return InscriptionOutcome("aborted", pm, latest)
         try:
-            result = await self.gw.finish_inscription(token)
+            result = await self.gw_for(pm.provider).finish_inscription(token)
         except GatewayUnavailable:
             self._fail_inscription(pm, PaymentMethodStatus.failed, "TBK_UNAVAILABLE")
             return InscriptionOutcome("error", pm, latest)
@@ -233,7 +242,7 @@ class BillingService:
     async def _remove_payment_method(self, pm: PaymentMethod, delete_remote: bool) -> None:
         if delete_remote and pm.tbk_user_enc:
             try:
-                await self.gw.delete_inscription(crypto.decrypt(pm.tbk_user_enc), pm.tbk_username)
+                await self.gw_for(pm.provider).delete_inscription(crypto.decrypt(pm.tbk_user_enc), pm.tbk_username)
             except (GatewayError, GatewayUnavailable) as exc:
                 # La inscripción remota queda huérfana pero inutilizable para nosotros; se registra.
                 log.warning("No se pudo eliminar la inscripción %s en Transbank: %s", pm.id, exc)
@@ -332,7 +341,7 @@ class BillingService:
         await self.db.commit()                       # ← persistido ANTES de llamar a Transbank
 
         try:
-            result = await self.gw.authorize(pm.tbk_username, crypto.decrypt(pm.tbk_user_enc), charge.buy_order,
+            result = await self.gw_for(pm.provider).authorize(pm.tbk_username, crypto.decrypt(pm.tbk_user_enc), charge.buy_order,
                                              charge.commerce_code, charge.detail_buy_order, charge.amount)
         except GatewayUnavailable as exc:
             log.warning("Cobro %s sin respuesta de Transbank: %s", charge.buy_order, exc)
@@ -524,7 +533,7 @@ class BillingService:
         refund = Refund(charge_id=charge.id, amount=amount, reason=reason, requested_by=admin.id,
                         requested_by_name=admin.full_name, status="failed")
         try:
-            result = await self.gw.refund(charge.buy_order, charge.commerce_code, charge.detail_buy_order, amount)
+            result = await (await self.gw_for_charge(charge)).refund(charge.buy_order, charge.commerce_code, charge.detail_buy_order, amount)
         except GatewayUnavailable:
             refund.failure_message = ("Transbank no respondió. Verifica en el portal de Transbank "
                                       "si el reembolso se aplicó antes de reintentar.")
@@ -559,7 +568,7 @@ class BillingService:
         """Resuelve un cobro pending/unknown consultando su estado en Transbank."""
         sub = await self.db.get(Subscription, charge.subscription_id)
         try:
-            result = await self.gw.status(charge.buy_order)
+            result = await (await self.gw_for_charge(charge)).status(charge.buy_order)
         except GatewayNotFound:
             # La transacción nunca llegó a Transbank: no cuenta como rechazo del usuario
             await self._apply_failure(sub, charge, "TBK_NOT_PROCESSED",

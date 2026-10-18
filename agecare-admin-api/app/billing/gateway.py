@@ -383,6 +383,53 @@ class FakeGateway:
                                  "nullified_amount": amount})
 
 
+# ---------------------------------------------------------------- enrutador (Transbank + datos demo)
+class RoutingGateway:
+    """Transbank para todo lo nuevo; el simulador solo para los medios de pago creados con él.
+
+    Al pasar un ambiente con datos demo (seed) a Transbank, esas tarjetas ficticias no existen
+    en Transbank: sin esto, el cron las rechazaría (−96) y dejaría morosas las suscripciones demo.
+    · Inscripciones nuevas → Transbank.
+    · Tokens/tbk_user del simulador ("fk…", "tbkuser-…") → simulador.
+    · Estado/reembolso de un cobro → según `PaymentMethod.provider` (ver BillingService.gw_for).
+    """
+
+    name = "transbank_oneclick"
+
+    def __init__(self, primary: PaymentGateway, fake: FakeGateway):
+        self.primary, self.fake = primary, fake
+
+    def for_provider(self, provider: str | None) -> PaymentGateway:
+        return self.fake if provider == FakeGateway.name else self.primary
+
+    @staticmethod
+    def _is_fake_user(tbk_user: str) -> bool:
+        return tbk_user.startswith("tbkuser-")
+
+    async def start_inscription(self, username: str, email: str, response_url: str) -> InscriptionStart:
+        return await self.primary.start_inscription(username, email, response_url)
+
+    async def finish_inscription(self, token: str) -> InscriptionResult:
+        gw = self.fake if FakeGateway.username_from_token(token) else self.primary
+        return await gw.finish_inscription(token)
+
+    async def delete_inscription(self, tbk_user: str, username: str) -> None:
+        gw = self.fake if self._is_fake_user(tbk_user) else self.primary
+        await gw.delete_inscription(tbk_user, username)
+
+    async def authorize(self, username: str, tbk_user: str, buy_order: str, child_commerce_code: str,
+                        child_buy_order: str, amount: int) -> AuthorizationResult:
+        gw = self.fake if self._is_fake_user(tbk_user) else self.primary
+        return await gw.authorize(username, tbk_user, buy_order, child_commerce_code, child_buy_order, amount)
+
+    async def status(self, buy_order: str) -> AuthorizationResult:
+        return await self.primary.status(buy_order)
+
+    async def refund(self, buy_order: str, child_commerce_code: str, child_buy_order: str,
+                     amount: int) -> RefundResult:
+        return await self.primary.refund(buy_order, child_commerce_code, child_buy_order, amount)
+
+
 # ---------------------------------------------------------------- fábrica
 _gateway: PaymentGateway | None = None
 
@@ -393,8 +440,10 @@ def get_gateway() -> PaymentGateway:
     if _gateway is None:
         s = get_settings()
         if s.billing_gateway == "transbank":
-            _gateway = TransbankOneclickGateway(s.tbk_base_url, s.tbk_commerce_code, s.tbk_api_secret,
-                                                timeout=s.tbk_timeout_seconds)
+            tbk = TransbankOneclickGateway(s.tbk_base_url, s.tbk_commerce_code, s.tbk_api_secret,
+                                           timeout=s.tbk_timeout_seconds)
+            # En producción no hay datos demo: Transbank directo, sin enrutador
+            _gateway = tbk if s.tbk_environment == "production" else RoutingGateway(tbk, FakeGateway())
         else:
             _gateway = FakeGateway()
     return _gateway
