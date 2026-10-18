@@ -111,15 +111,24 @@ Webpay (simulado): Visa ···· 6623 = aprobada · Mastercard ···· 0568 = r
 Ningún cobro es real.
 ```
 
-## 5. (Opcional) Transbank real en ambiente de integración
+## 5. Transbank (ambiente de integración)
 
-Como Vercel publica la API en internet, Webpay puede volver a ella: puedes probar contra el
-**ambiente de integración real de Transbank** cambiando `ADMIN_BILLING_GATEWAY=transbank`
-(las credenciales de integración vienen por defecto). En el formulario de Transbank usa
-Visa `4051 8856 0044 6623`, CVV `123` (aprobada) o Mastercard `5186 0595 5959 0568`
-(rechazada); en el simulador bancario RUT `11.111.111-1`, clave `123`.
-Los datos demo del seed tienen tarjetas ficticias: renovarlos contra Transbank real fallará
-(código −96), así que en ese modo prueba con usuarios generados en el checkout.
+Como Vercel publica la API en internet, Webpay puede volver a ella. Para usar el **Webpay real de
+Transbank en su ambiente de integración**, cambia en la API `ADMIN_BILLING_GATEWAY` a `transbank` y
+haz *Redeploy* (las credenciales de integración vienen por defecto; no hay que agregar otras).
+
+En el formulario de Webpay: Visa `4051 8856 0044 6623`, CVV `123`, vencimiento futuro (aprobada) o
+Mastercard `5186 0595 5959 0568` (rechazada); si pide autenticación, RUT `11.111.111-1`, clave `123`.
+
+Las suscripciones demo del seed (y las creadas antes con el simulador) **siguen en el simulador**:
+la API elige la pasarela según el `provider` del medio de pago, así el cron no las deja morosas.
+Todo lo nuevo se inscribe, cobra y reembolsa en Transbank (`provider = transbank_oneclick`).
+Para volver al simulador: `ADMIN_BILLING_GATEWAY=fake` y *Redeploy*.
+
+**Producción (cobros reales):** requiere que Wellq Co contrate *Oneclick Mall* con Transbank, pase
+la validación de integración y reciba sus códigos de comercio y llave secreta. Entonces se
+configuran `ADMIN_ENVIRONMENT=prod`, `ADMIN_TBK_ENVIRONMENT=production`, `ADMIN_TBK_COMMERCE_CODE`,
+`ADMIN_TBK_CHILD_COMMERCE_CODE` y `ADMIN_TBK_API_SECRET` (ver `agecare-admin-api/docs/BILLING.md`).
 
 ## 6. Cron de facturación
 
