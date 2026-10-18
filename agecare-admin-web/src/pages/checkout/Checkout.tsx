@@ -33,6 +33,7 @@ export default function Checkout() {
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [demo, setDemo] = useState<{ email: string; family_id: string; provider_id: string } | null>(null);
+  const [gateway, setGateway] = useState<string | null>(null);
 
   async function newDemoUser() {
     setErr(null);
@@ -45,6 +46,7 @@ export default function Checkout() {
   }
 
   useEffect(() => { billingApp.plans().then((r) => setPlans(r.plans)).catch(setErr); }, []);
+  useEffect(() => { billingAdmin.summary().then((s) => setGateway(s.gateway)).catch(() => setGateway(null)); }, []);
   useEffect(() => {
     if (!token) return;
     saveToken(token);
@@ -123,6 +125,14 @@ export default function Checkout() {
             <div className="muted" style={{ fontSize: 11.5, marginTop: 10 }}>
               Sin tarjeta inscrita, se abre Webpay Oneclick para inscribirla y se cobra el primer mes al volver.
             </div>
+            {gateway && gateway !== "fake" && (
+              <div className="soft" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.6 }}>
+                <b>Webpay de Transbank · ambiente de integración</b> (ningún cobro es real)<br />
+                Aprobada: Visa <span className="mono">4051 8856 0044 6623</span> · CVV <span className="mono">123</span> · vencimiento futuro<br />
+                Rechazada: Mastercard <span className="mono">5186 0595 5959 0568</span><br />
+                Si pide autenticación: RUT <span className="mono">11.111.111-1</span> · clave <span className="mono">123</span>
+              </div>
+            )}
           </div>
 
           <div className="card">
