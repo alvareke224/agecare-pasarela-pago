@@ -44,6 +44,15 @@ export default function Summary() {
           </div>
         </div>
       )}
+      {s.gateway !== "fake" && (
+        <div className="banner ok">
+          <span className="b-ico" aria-hidden="true">✔</span>
+          <div>
+            <div className="b-t">Conectado a Transbank Oneclick Mall</div>
+            <div className="b-s">Las tarjetas nuevas se inscriben y cobran en Transbank. Las suscripciones de demostración siguen en el simulador.</div>
+          </div>
+        </div>
+      )}
       {s.unresolved_charges > 0 && (
         <div className="banner warn">
           <span className="b-ico" aria-hidden="true">◌</span>
