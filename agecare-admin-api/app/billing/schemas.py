@@ -315,3 +315,13 @@ class CycleOut(BaseModel):
     expired_subscriptions: int
     expired_inscriptions: int
     errors: list[str]
+
+
+class DevAppTokenOut(BaseModel):
+    """Usuario ficticio de la app para el Checkout de prueba."""
+    token: str = Field(description="JWT de usuario de la app, válido por 12 horas.")
+    user_id: UUID
+    email: str
+    family_id: UUID = Field(description="Familia propia del usuario (para probar Platino).")
+    provider_id: UUID = Field(description="Perfil de proveedor propio (para probar el plan Proveedor).")
+

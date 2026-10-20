@@ -9,17 +9,19 @@ que el orquestador lo marque como fallido y alerte (Application Insights).
 """
 import asyncio
 import json
-import logging
 import sys
 
 from app.billing import models as billing_models  # noqa: F401
 from app.billing.gateway import get_gateway
 from app.billing.jobs import run_billing_cycle
+from app.config import get_settings
 from app.database import get_session_factory
+from app.logs import setup_logging
 
 
 async def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    s = get_settings()
+    setup_logging(s.log_level, s.log_format, s.environment)
     async with get_session_factory()() as db:
         stats = await run_billing_cycle(db, get_gateway())
         await db.commit()

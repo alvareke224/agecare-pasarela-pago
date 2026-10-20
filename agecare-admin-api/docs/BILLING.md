@@ -232,9 +232,15 @@ retorno (p. ej. con un túnel). Tarjetas: Visa 4051 8856 0044 6623 (CVV 123, apr
 Mastercard 5186 0595 5959 0568 (rechazada); RUT 11.111.111-1, clave 123 en el simulador
 bancario.
 
+En ese modo (`ADMIN_TBK_ENVIRONMENT=integration`) la pasarela es un `RoutingGateway`: las
+inscripciones nuevas van a Transbank y los medios de pago creados con el simulador
+(`provider = fake`, p. ej. los del seed) se siguen cobrando, conciliando y reembolsando en el
+simulador, para que el cron no deje morosas las suscripciones demo. En producción se usa
+Transbank directo, sin enrutador.
+
 ### Tests
 
-- `pytest` — 65 tests (23 originales + 42 de facturación y despliegue serverless): checkout completo vía simulador,
+- `pytest` — 73 tests (23 originales + 50 de facturación y despliegue serverless): checkout completo vía simulador y vía Transbank simulado por HTTP (enrutamiento demo/Transbank),
   reglas de beneficiario, cobro perdido por timeout y conciliado sin doble cobro, dunning
   completo hasta la cancelación, recuperación, cancelación programada, cambio de plan,
   expiración, inscripción eliminada en Transbank (−96), job en otro proceso, permisos,

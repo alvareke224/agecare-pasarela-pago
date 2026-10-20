@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import secrets
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
@@ -23,6 +25,9 @@ from typing import Protocol
 import httpx
 
 from app.config import get_settings
+from app.logs import log_event, safe_path
+
+tbk_log = logging.getLogger("agecare.billing.transbank")
 
 API_PATH = "/rswebpaytransaction/api/oneclick/v1.2"
 
@@ -150,10 +155,18 @@ class TransbankOneclickGateway:
         )
 
     async def _request(self, method: str, path: str, json: dict | None = None) -> dict:
+        start, shown = time.perf_counter(), safe_path(path)
         try:
             r = await self._client.request(method, path, json=json)
         except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            log_event(tbk_log, "tbk.unavailable", f"{method} {shown} sin respuesta", logging.WARNING,
+                      method=method, path=shown, error=exc.__class__.__name__,
+                      duration_ms=round((time.perf_counter() - start) * 1000, 1))
             raise GatewayUnavailable(f"Transbank no respondió: {exc.__class__.__name__}") from exc
+        log_event(tbk_log, "tbk.response", f"{method} {shown} → {r.status_code}",
+                  logging.WARNING if r.status_code >= 400 else logging.INFO,
+                  method=method, path=shown, status=r.status_code,
+                  duration_ms=round((time.perf_counter() - start) * 1000, 1))
         if r.status_code >= 500:
             raise GatewayUnavailable(f"Transbank respondió {r.status_code}")
         body: dict = {}

@@ -20,6 +20,7 @@ from fastapi import Depends, Request
 
 from app.config import get_settings
 from app.errors import ApiError
+from app.logs import actor_var
 
 
 @dataclass
@@ -60,7 +61,10 @@ async def get_app_user(request: Request) -> AppUser:
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise _unauthorized()
-    return decode_app_token(auth.removeprefix("Bearer ").strip())
+    user = decode_app_token(auth.removeprefix("Bearer ").strip())
+    request.state.actor_ref = f"user:{user.id}"
+    actor_var.set(request.state.actor_ref)
+    return user
 
 
 CurrentAppUser = Annotated[AppUser, Depends(get_app_user)]

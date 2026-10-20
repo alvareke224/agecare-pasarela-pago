@@ -1,4 +1,5 @@
 """AgeCare — API de la Consola de Administración (FastAPI + PostgreSQL)."""
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
@@ -8,14 +9,21 @@ from app.billing import router_admin as billing_admin
 from app.billing import router_app as billing_app
 from app.config import get_settings
 from app.errors import RequestIdMiddleware, register_error_handlers
+from app.logs import log_event, setup_logging
 from app.routers import (auth, content, marketplace, metrics_commercial, metrics_features,
                          metrics_roles, moderation, ops, support)
 from app.routers import system as system_router
 
 
+_s = get_settings()
+setup_logging(_s.log_level, _s.log_format, _s.environment)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     get_settings().validate_billing()   # impide arrancar en prod con credenciales de integración
+    log_event(logging.getLogger("agecare.app"), "app.started", "API iniciada",
+              gateway=_s.billing_gateway, tbk_environment=_s.tbk_environment)
     yield
 
 
@@ -52,6 +60,20 @@ app.include_router(api)
 # Pasarela de pago para la app (usuarios finales, JWT de la app; no es parte de /admin)
 app.include_router(billing_app.router)
 
+
+
+def custom_openapi():
+    """OpenAPI de FastAPI + resúmenes en español y errores documentados de facturación."""
+    if app.openapi_schema is None:
+        from fastapi.openapi.utils import get_openapi
+
+        from app.billing.api_docs import apply_to_openapi
+        app.openapi_schema = apply_to_openapi(get_openapi(
+            title=app.title, version=app.version, description=app.description, routes=app.routes))
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi  # type: ignore[method-assign]
 
 
 @app.get("/", include_in_schema=False)

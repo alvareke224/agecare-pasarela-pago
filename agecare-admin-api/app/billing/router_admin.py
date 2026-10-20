@@ -19,7 +19,7 @@ from app.billing.gateway import PaymentGateway, get_gateway
 from app.billing.jobs import run_billing_cycle
 from app.billing.models import BillingEvent, Charge, Refund, Subscription
 from app.billing.schemas import (AdminCancelIn, AdminChargeDetailOut, AdminChargeOut, AdminSubscriptionDetailOut,
-                                 AdminSubscriptionOut, BillingSummaryOut, ChargeStats, CycleOut, EventOut, ExtendIn,
+                                 AdminSubscriptionOut, BillingSummaryOut, ChargeStats, CycleOut, DevAppTokenOut, EventOut, ExtendIn,
                                  PlanRow,
                                  RefundIn, RefundOut, SubscriptionCounts, Upcoming)
 from app.billing.service import BillingService
@@ -275,7 +275,7 @@ async def run_cycle(request: Request, db: Db, gateway: PaymentGateway = Depends(
 
 
 # ---------------------------------------------------------------- usuario de prueba (QA / demo)
-@router.post("/dev/app-token")
+@router.post("/dev/app-token", response_model=DevAppTokenOut)
 async def dev_app_token(request: Request, db: Db,
                         admin: core_models.AdminUser = require("billing", write=True)):
     """Emite un JWT de usuario de la app para el *Checkout de prueba* (demos en Vercel, QA).

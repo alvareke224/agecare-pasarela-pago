@@ -149,8 +149,10 @@ async def _tbk_params(request: Request) -> dict[str, str]:
     return params
 
 
-@router.api_route("/oneclick/return", methods=["GET", "POST"], include_in_schema=True,
-                  summary="Retorno de Webpay tras la inscripción (response_url)")
+@router.get("/oneclick/return", operation_id="oneclick_return_get",
+            summary="Retorno de Webpay tras la inscripción (response_url)")
+@router.post("/oneclick/return", operation_id="oneclick_return_post",
+             summary="Retorno de Webpay tras la inscripción (response_url)")
 async def oneclick_return(request: Request, service: BillingService = Depends(svc)):
     params = await _tbk_params(request)
     token = params.get("TBK_TOKEN", "")

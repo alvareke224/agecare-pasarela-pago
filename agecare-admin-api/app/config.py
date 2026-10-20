@@ -33,6 +33,8 @@ class Settings(BaseSettings):
 
     app_name: str = "AgeCare Admin API"
     environment: str = "dev"  # dev | staging | prod
+    log_level: str = "INFO"     # DEBUG | INFO | WARNING | ERROR
+    log_format: str = "json"    # json (Vercel/Docker/Azure) | text (lectura en local)
     database_url: str = Field(default="", validate_default=True)
     # Serverless (Vercel): sin pool persistente entre invocaciones. Se activa solo en Vercel.
     db_nullpool: bool = bool(os.environ.get("VERCEL"))

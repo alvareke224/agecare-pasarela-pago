@@ -11,6 +11,7 @@ from app import models
 from app.database import get_db
 from app.enums import READ, WRITE, AdminRole
 from app.errors import forbidden, unauthorized
+from app.logs import actor_var
 from app.security import decode_access_token
 
 
@@ -27,6 +28,8 @@ async def get_current_admin(request: Request,
     if admin is None or not admin.is_active:
         raise unauthorized()
     request.state.actor = admin
+    request.state.actor_ref = f"admin:{admin.id}"
+    actor_var.set(request.state.actor_ref)
     return admin
 
 

@@ -13,6 +13,7 @@ vuelo para la misma suscripción. Un error en una suscripción no detiene el res
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from uuid import UUID
@@ -23,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.billing.enums import (CancelReason, ChargeKind, ChargeStatus, PaymentMethodStatus,
                                SubscriptionStatus)
 from app.billing.gateway import PaymentGateway
+from app.logs import log_event
 from app.billing.models import Charge, PaymentMethod, Subscription
 from app.billing.service import BillingService
 from app.errors import ApiError
@@ -48,6 +50,7 @@ class CycleStats:
 
 
 async def run_billing_cycle(db: AsyncSession, gateway: PaymentGateway, now=None) -> CycleStats:
+    started = time.perf_counter()
     svc = BillingService(db, gateway, now=now)
     now = svc.now()
     stats = CycleStats()
@@ -83,6 +86,8 @@ async def run_billing_cycle(db: AsyncSession, gateway: PaymentGateway, now=None)
         PaymentMethod.inscription_expires_at <= now - timedelta(minutes=5)))).scalars().all()
     for pm in abandoned:
         pm.status, pm.failure_code = PaymentMethodStatus.aborted.value, "TBK_TIMEOUT"
+        svc.event("payment_method.aborted", user_id=pm.user_id, payment_method_id=str(pm.id),
+                  failure_code="TBK_TIMEOUT")
         stats.expired_inscriptions += 1
     await db.commit()
 
@@ -109,6 +114,9 @@ async def run_billing_cycle(db: AsyncSession, gateway: PaymentGateway, now=None)
             await db.rollback()
             stats.errors.append(f"subscription {sub.id}: {exc}")
             log.exception("Error procesando la suscripción %s", sub.id)
+    log_event(log, "job.billing_cycle", "Ciclo de facturación terminado",
+              logging.ERROR if stats.errors else logging.INFO,
+              duration_ms=round((time.perf_counter() - started) * 1000, 1), **stats.as_dict())
     return stats
 
 

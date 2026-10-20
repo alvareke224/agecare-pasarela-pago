@@ -27,6 +27,7 @@ from app.billing.app_auth import AppUser
 from app.billing.enums import (LIVE_STATUSES, PAID_CHARGE_STATUSES, PLAN_UNITS, SUBSCRIPTION_TRANSITIONS,
                                BillingUnit, CancelReason, ChargeKind, ChargeStatus, PaymentMethodStatus,
                                SubscriptionStatus, rejection_for)
+from app.logs import log_event
 from app.billing.gateway import (AuthorizationResult, GatewayError, GatewayNotFound, GatewayUnavailable,
                                  InscriptionStart, PaymentGateway)
 from app.billing.models import BillingEvent, Charge, PaymentMethod, Refund, Subscription
@@ -37,6 +38,10 @@ from app.errors import ApiError, conflict, invalid, not_found
 from app.security import as_utc, now_utc
 
 log = logging.getLogger("agecare.billing")
+# Nivel de log de cada evento de negocio (el resto es INFO)
+ERROR_EVENTS = {"charge.amount_mismatch", "charge.succeeded_on_closed_subscription", "refund.unconfirmed"}
+WARNING_SUFFIXES = (".failed", ".unknown", ".past_due", ".aborted", ".expired", ".skipped",
+                    ".plan_change_skipped")
 
 DEFAULT_RETRY_DAYS = [1, 3, 5]
 INSCRIPTION_TTL = {"integration": timedelta(minutes=10), "production": timedelta(minutes=5)}
@@ -100,11 +105,17 @@ class BillingService:
     def event(self, type_: str, *, sub: Subscription | None = None, charge: Charge | None = None,
               user_id: UUID | None = None, actor_type: str = "system", actor_id: UUID | None = None,
               **payload) -> None:
+        clean = {k: v for k, v in payload.items() if v is not None}
+        uid = user_id or (sub.user_id if sub else None)
         self.db.add(BillingEvent(subscription_id=sub.id if sub else None,
                                  charge_id=charge.id if charge else None,
-                                 user_id=user_id or (sub.user_id if sub else None),
-                                 type=type_, actor_type=actor_type, actor_id=actor_id,
-                                 payload={k: v for k, v in payload.items() if v is not None}))
+                                 user_id=uid, type=type_, actor_type=actor_type, actor_id=actor_id,
+                                 payload=clean))
+        level = (logging.ERROR if type_ in ERROR_EVENTS
+                 else logging.WARNING if type_.endswith(WARNING_SUFFIXES) else logging.INFO)
+        log_event(log, f"billing.{type_}", type_, level,
+                  subscription_id=str(sub.id) if sub else None, charge_id=str(charge.id) if charge else None,
+                  user_id=str(uid) if uid else None, actor_type=actor_type, **clean)
 
     @staticmethod
     def transition(sub: Subscription, to: SubscriptionStatus) -> None:
