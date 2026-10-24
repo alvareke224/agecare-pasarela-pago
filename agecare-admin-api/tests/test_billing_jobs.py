@@ -201,3 +201,67 @@ async def test_job_in_another_process_renews(client, fake_gw, app_headers, sessi
     sub = await _sub(session, sid)
     assert sub.status == "active"
     assert (await _charges(session, sub))[-1].status == "authorized"
+
+
+async def test_old_encryption_key_still_charges_and_is_rotated(client, fake_gw, app_headers, session, monkeypatch):
+    """Tarjetas cifradas con una llave anterior (p. ej. el seed cargado en Azure) se cobran y se re-cifran."""
+    import uuid
+
+    from cryptography.fernet import Fernet
+
+    from app.billing import crypto
+    from app.billing.enums import ChargeKind
+    from app.billing.gateway import get_gateway
+    from app.billing.models import PaymentMethod, Subscription
+    from app.billing.service import BillingService
+    from app.config import get_settings
+
+    old_key, new_key = Fernet.generate_key().decode(), Fernet.generate_key().decode()
+    s = get_settings()
+    monkeypatch.setattr(s, "environment", "prod")              # sin la llave de desarrollo de respaldo
+    monkeypatch.setattr(s, "billing_encryption_key", old_key)
+    crypto._fernet.cache_clear()
+    try:
+        data, _ = await subscribe_with_card(client, app_headers(), "gold")   # cifrada con la llave antigua
+        sub = await session.get(Subscription, uuid.UUID(data["subscription"]["id"]))
+        pm = await session.get(PaymentMethod, sub.payment_method_id)
+        old_cipher = bytes(pm.tbk_user_enc)
+
+        monkeypatch.setattr(s, "billing_encryption_key", new_key)         # se rota la llave
+        crypto._fernet.cache_clear()
+        with pytest.raises(crypto.DecryptionError):                        # sin declarar la anterior: ilegible
+            crypto.decrypt(old_cipher)
+
+        monkeypatch.setattr(s, "billing_encryption_keys_old", old_key)    # se declara la anterior
+        crypto._fernet.cache_clear()
+        charge = await BillingService(session, get_gateway()).charge(sub, ChargeKind.renewal)
+        assert charge.status == "authorized"
+        await session.refresh(pm)
+        assert bytes(pm.tbk_user_enc) != old_cipher and crypto.is_current(pm.tbk_user_enc)
+    finally:
+        crypto._fernet.cache_clear()
+
+async def test_unreadable_card_does_not_leave_pending_charge(client, fake_gw, app_headers, session, monkeypatch):
+    from sqlalchemy import func, select
+
+    from app.billing import crypto
+    from app.billing.enums import ChargeKind
+    from app.billing.gateway import get_gateway
+    from app.billing.models import Charge, Subscription
+    from app.billing.service import BillingService
+    from app.errors import ApiError
+    from tests.billing_helpers import subscribe_with_card
+
+    data, _ = await subscribe_with_card(client, app_headers(), "gold")
+    sid = __import__("uuid").UUID(data["subscription"]["id"])
+    before = (await session.execute(select(func.count()).select_from(Charge).where(Charge.subscription_id == sid))).scalar_one()
+
+    def boom(_):
+        raise crypto.DecryptionError("llave distinta")
+    monkeypatch.setattr(crypto, "decrypt", boom)
+    sub = await session.get(Subscription, sid)
+    with pytest.raises(ApiError) as err:
+        await BillingService(session, get_gateway()).charge(sub, ChargeKind.renewal)
+    assert err.value.code == "PAYMENT_METHOD_UNREADABLE"
+    after = (await session.execute(select(func.count()).select_from(Charge).where(Charge.subscription_id == sid))).scalar_one()
+    assert after == before          # no quedó un cobro pending huérfano

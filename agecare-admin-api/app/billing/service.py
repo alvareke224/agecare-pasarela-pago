@@ -332,6 +332,14 @@ class BillingService:
         pm = await self.db.get(PaymentMethod, sub.payment_method_id) if sub.payment_method_id else None
         if pm is None or pm.status != PaymentMethodStatus.active or not pm.tbk_user_enc:
             raise conflict("NO_PAYMENT_METHOD", "La suscripción no tiene una tarjeta activa para cobrar.")
+        # Se descifra ANTES de registrar el cobro: un problema de llave no deja cobros pendientes
+        try:
+            tbk_user = crypto.decrypt(pm.tbk_user_enc)
+        except crypto.DecryptionError as exc:
+            log.error("Tarjeta %s ilegible: %s", pm.id, exc, extra={"event": "billing.payment_method_unreadable"})
+            raise conflict("PAYMENT_METHOD_UNREADABLE", str(exc))
+        if not crypto.is_current(pm.tbk_user_enc):           # cifrado con una llave anterior: se migra
+            pm.tbk_user_enc = crypto.rotate(pm.tbk_user_enc)
         now = self.now()
         if kind == ChargeKind.initial:
             start, anchor = now, now.day
@@ -352,7 +360,7 @@ class BillingService:
         await self.db.commit()                       # ← persistido ANTES de llamar a Transbank
 
         try:
-            result = await self.gw_for(pm.provider).authorize(pm.tbk_username, crypto.decrypt(pm.tbk_user_enc), charge.buy_order,
+            result = await self.gw_for(pm.provider).authorize(pm.tbk_username, tbk_user, charge.buy_order,
                                              charge.commerce_code, charge.detail_buy_order, charge.amount)
         except GatewayUnavailable as exc:
             log.warning("Cobro %s sin respuesta de Transbank: %s", charge.buy_order, exc)

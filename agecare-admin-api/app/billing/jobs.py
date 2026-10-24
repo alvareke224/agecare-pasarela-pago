@@ -71,7 +71,7 @@ async def run_billing_cycle(db: AsyncSession, gateway: PaymentGateway, now=None)
             await db.commit()
         except Exception as exc:  # noqa: BLE001
             await db.rollback()
-            stats.errors.append(f"reconcile {charge.buy_order}: {exc}")
+            stats.errors.append(f"reconcile {charge.buy_order}: {type(exc).__name__}: {exc}"[:300])
             log.exception("Error conciliando %s", charge.buy_order)
 
     # 2 · Expiración
@@ -115,7 +115,7 @@ async def run_billing_cycle(db: AsyncSession, gateway: PaymentGateway, now=None)
             await db.commit()
         except Exception as exc:  # noqa: BLE001
             await db.rollback()
-            stats.errors.append(f"subscription {sub.id}: {exc}")
+            stats.errors.append(f"subscription {sub.id}: {type(exc).__name__}: {exc}"[:300])
             log.exception("Error procesando la suscripción %s", sub.id)
 
     # 5 · Métricas comerciales con datos reales (metrics_plan_snapshot y metrics_daily_users)
@@ -125,7 +125,7 @@ async def run_billing_cycle(db: AsyncSession, gateway: PaymentGateway, now=None)
         stats.paying_units, stats.mrr_clp = synced.paying_units, synced.mrr_clp
     except Exception as exc:  # noqa: BLE001
         await db.rollback()
-        stats.errors.append(f"metrics_sync: {exc}")
+        stats.errors.append(f"metrics_sync: {type(exc).__name__}: {exc}"[:300])
         log.exception("Error conciliando las métricas comerciales")
     log_event(log, "job.billing_cycle", "Ciclo de facturación terminado",
               logging.ERROR if stats.errors else logging.INFO,

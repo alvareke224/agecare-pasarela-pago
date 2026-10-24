@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     billing_currency: str = "CLP"
     # Llave Fernet para cifrar tbk_user (Key Vault en Azure). Obligatoria fuera de dev.
     billing_encryption_key: str = ""
+    # Llaves anteriores (separadas por coma) solo para descifrar: permiten rotar la llave
+    billing_encryption_keys_old: str = ""
     # URL pública de esta API (Transbank redirige aquí tras la inscripción)
     public_base_url: str = "http://localhost:8000"
     # Adónde se envía al usuario tras inscribir la tarjeta (web o deep link de la app)
