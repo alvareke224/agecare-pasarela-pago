@@ -139,7 +139,7 @@ export default function Summary() {
           <div className="card-head">
             <div>
               <div className="card-title">Ciclo de facturación</div>
-              <div className="card-sub">Concilia cobros pendientes, renueva, reintenta y expira. En producción corre solo cada 15 minutos.</div>
+              <div className="card-sub">Concilia cobros pendientes, renueva, reintenta y expira. En Vercel corre solo una vez al día (04:00 en Chile); en Docker, cada 15 minutos.</div>
             </div>
             <button className="btn" onClick={runCycle} disabled={running}>{running ? "Ejecutando…" : "▶ Ejecutar ahora"}</button>
           </div>
