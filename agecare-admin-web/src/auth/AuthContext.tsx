@@ -56,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const can = useCallback((perm: "billing" | "billing.write" | "billing_refunds") => {
     if (!me) return false;
-    if (perm === "billing.write") return me.permissions.includes("billing") && (me.role === "admin" || me.role === "support");
+    if (perm === "billing.write") return me.permissions.includes("billing") && me.role === "admin";
     return me.permissions.includes(perm);
   }, [me]);
 

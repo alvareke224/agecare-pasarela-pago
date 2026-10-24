@@ -43,7 +43,7 @@ export default function Layout() {
                 <NavLink end to="/facturacion" className="nav-item"><span className="ico">💳</span>Resumen de facturación</NavLink>
                 <NavLink to="/facturacion/suscripciones" className="nav-item"><span className="ico">🔁</span>Suscripciones</NavLink>
                 <NavLink to="/facturacion/cobros" className="nav-item"><span className="ico">🧾</span>Cobros y reembolsos</NavLink>
-                <NavLink to="/checkout" className="nav-item"><span className="ico">🧪</span>Checkout de prueba</NavLink>
+                {can("billing.write") && <NavLink to="/checkout" className="nav-item"><span className="ico">🧪</span>Checkout de prueba</NavLink>}
               </>
             )}
             <div className="nav-group">Otros módulos</div>

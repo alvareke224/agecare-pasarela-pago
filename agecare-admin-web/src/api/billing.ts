@@ -137,6 +137,9 @@ export const billingAdmin = {
     api.get<{ charge: AdminCharge; refunds: Refund[]; refundable_amount: number; gateway_response: unknown }>(`${ADMIN}/billing/charges/${id}`),
   refund: (id: string, body: { amount: number; reason: string }) =>
     api.post<Refund>(`${ADMIN}/billing/charges/${id}/refunds`, body),
+  chargeback: (id: string, body: { note: string; tbk_reference?: string; cancel_subscription: boolean }) =>
+    api.post<{ charge_id: string; amount: number; already_registered: boolean; subscription: { status: string } }>(
+      `${ADMIN}/billing/charges/${id}/chargeback`, body),
   runCycle: () => api.post<CycleStats>(`${ADMIN}/billing/jobs/billing-cycle`),
   devAppToken: () =>
     api.post<{ token: string; email: string; family_id: string; provider_id: string }>(`${ADMIN}/billing/dev/app-token`),
