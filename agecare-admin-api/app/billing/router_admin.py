@@ -1,8 +1,9 @@
 """Consola · Facturación: /api/v1/admin/billing/…
 
 Permisos (matriz de app/enums.py):
-    billing          lectura: admin, analista, soporte · escritura: admin, soporte
-    billing_refunds  escritura: solo admin (reembolsos)
+    billing          lectura: admin, analista, soporte · escritura: solo admin
+    billing_refunds  escritura: solo admin (reembolsos, contracargos, ciclo manual)
+Con ADMIN_ENVIRONMENT=prod toda escritura exige además 2FA activo (MFA_REQUIRED).
 Toda escritura queda en audit_log.
 """
 from datetime import datetime, timedelta
@@ -17,9 +18,10 @@ from app.billing.enums import (PAID_CHARGE_STATUSES, PAID_PLANS, CancelReason, C
                                SubscriptionStatus)
 from app.billing.gateway import PaymentGateway, get_gateway
 from app.billing.jobs import run_billing_cycle
+from app.billing.metrics_sync import sync_commercial_metrics
 from app.billing.models import BillingEvent, Charge, Refund, Subscription
 from app.billing.schemas import (AdminCancelIn, AdminChargeDetailOut, AdminChargeOut, AdminSubscriptionDetailOut,
-                                 AdminSubscriptionOut, BillingSummaryOut, ChargeStats, CycleOut, DevAppTokenOut, EventOut, ExtendIn,
+                                 AdminSubscriptionOut, BillingSummaryOut, ChargebackIn, ChargebackOut, ChargeStats, CycleOut, DevAppTokenOut, EventOut, ExtendIn,
                                  PlanRow,
                                  RefundIn, RefundOut, SubscriptionCounts, Upcoming)
 from app.billing.service import BillingService
@@ -262,6 +264,46 @@ async def refund_charge(charge_id: UUID, body: RefundIn, request: Request, db: D
                 after={"status": charge.status, "refunded_amount": charge.refunded_amount,
                        "refund_type": refund.refund_type, "amount": body.amount, "reason": body.reason})
     return RefundOut.of(refund)
+
+
+# ---------------------------------------------------------------- contracargos
+@router.post("/charges/{charge_id}/chargeback", response_model=ChargebackOut)
+async def register_chargeback(charge_id: UUID, body: ChargebackIn, request: Request, db: Db,
+                              service: BillingService = Depends(svc),
+                              admin: core_models.AdminUser = require("billing_refunds", write=True)):
+    """Registra un contracargo informado por Transbank. Idempotente: repetirlo no duplica nada.
+
+    Transbank no notifica contracargos por API (no hay webhooks en Webpay/Oneclick): llegan por el
+    portal de comercios. Este endpoint los incorpora: deja el evento `charge.chargeback`, cancela la
+    suscripción (motivo fraude) y recalcula las métricas comerciales.
+    """
+    charge = await _charge(db, charge_id, lock=True)          # serializa registros simultáneos
+    if charge.status not in PAID_CHARGE_STATUSES:
+        raise conflict("CHARGE_NOT_PAID", "Solo un cobro aprobado puede tener contracargo.")
+    amount = body.amount or charge.amount
+    if amount > charge.amount:
+        raise invalid("CHARGEBACK_EXCEEDS_CHARGE", f"El monto supera lo cobrado ({charge.amount} CLP).")
+    sub = await _sub(db, charge.subscription_id)
+    existing = (await db.execute(select(BillingEvent.id).where(
+        BillingEvent.charge_id == charge.id, BillingEvent.type == "charge.chargeback"))).first()
+    if existing:
+        return ChargebackOut(charge_id=charge.id, amount=amount, already_registered=True,
+                             subscription=AdminSubscriptionOut.of(sub))
+    before = _snapshot(sub)
+    service.event("charge.chargeback", sub=sub, charge=charge, actor_type="admin", actor_id=admin.id,
+                  amount=amount, tbk_reference=body.tbk_reference, buy_order=charge.buy_order)
+    if body.cancel_subscription and sub.status in (SubscriptionStatus.incomplete, SubscriptionStatus.active,
+                                                   SubscriptionStatus.past_due):
+        service.cancel_now(sub, CancelReason.fraud, note=f"Contracargo: {body.note}"[:500],
+                           actor_type="admin", actor_id=admin.id)
+    await audit(db, request, "billing.chargeback", "billing_charge", charge.id, before=before,
+                after={**_snapshot(sub), "amount": amount, "tbk_reference": body.tbk_reference, "note": body.note})
+    await db.commit()
+    await sync_commercial_metrics(db)                          # el MRR del dashboard baja de inmediato
+    await db.commit()
+    await db.refresh(sub)
+    return ChargebackOut(charge_id=charge.id, amount=amount, already_registered=False,
+                         subscription=AdminSubscriptionOut.of(sub))
 
 
 # ---------------------------------------------------------------- job manual (QA / operación)

@@ -132,6 +132,7 @@ Campos comunes: `subscription_id`, `charge_id`, `user_id`, `actor_type` (`user`,
 | `charge.skipped` | WARNING | El job no cobró (p. ej., sin tarjeta activa) | `reason` |
 | `charge.amount_mismatch` | **ERROR** | Transbank aprobó un monto distinto al pedido | `expected`, `received` |
 | `charge.succeeded_on_closed_subscription` | **ERROR** | Cobro conciliado tarde sobre una suscripción ya cerrada: hay que reembolsar | `subscription_status` |
+| `charge.chargeback` | **ERROR** | Contracargo registrado desde la consola | `amount`, `tbk_reference`, `buy_order` |
 | `charge.refunded` | INFO | Reembolso aplicado | `amount`, `refund_type` |
 | `refund.failed` | WARNING | Transbank rechazó el reembolso | `amount` |
 | `refund.unconfirmed` | **ERROR** | Transbank no respondió al reembolso: verificar en su portal antes de reintentar | `amount` |
@@ -140,6 +141,7 @@ Campos comunes: `subscription_id`, `charge_id`, `user_id`, `actor_type` (`user`,
 
 | `event` | Nivel | Cuándo | Campos propios |
 |---|---|---|---|
+| `job.metrics_sync` | INFO | Métricas comerciales conciliadas con la facturación | `as_of`, `paying_units`, `mrr_clp` |
 | `app.started` | INFO | Arranque de la API | `gateway`, `tbk_environment` |
 | `job.billing_cycle` | INFO · ERROR si hubo errores | Fin de cada ciclo de facturación (cron, botón *Ejecutar ahora* o contenedor del job) | `duration_ms`, `reconciled`, `renewed`, `recovered`, `failed`, `unknown`, `canceled`, `expired_subscriptions`, `expired_inscriptions`, `errors` |
 

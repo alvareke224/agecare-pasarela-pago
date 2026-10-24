@@ -175,5 +175,6 @@ WRITE = {"ops": {AdminRole.admin, AdminRole.support},
          "settings": {AdminRole.admin},
          "legal": {AdminRole.admin},
          "staff": {AdminRole.admin},
-         "billing": {AdminRole.admin, AdminRole.support},
+         # Pagos: toda escritura (cancelar, extender, reintentar, reembolsar, contracargos) solo admin
+         "billing": {AdminRole.admin},
          "billing_refunds": {AdminRole.admin}}

@@ -39,7 +39,7 @@ from app.security import as_utc, now_utc
 
 log = logging.getLogger("agecare.billing")
 # Nivel de log de cada evento de negocio (el resto es INFO)
-ERROR_EVENTS = {"charge.amount_mismatch", "charge.succeeded_on_closed_subscription", "refund.unconfirmed"}
+ERROR_EVENTS = {"charge.chargeback", "charge.amount_mismatch", "charge.succeeded_on_closed_subscription", "refund.unconfirmed"}
 WARNING_SUFFIXES = (".failed", ".unknown", ".past_due", ".aborted", ".expired", ".skipped",
                     ".plan_change_skipped")
 

@@ -8,9 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models
+from app.config import get_settings
 from app.database import get_db
 from app.enums import READ, WRITE, AdminRole
-from app.errors import forbidden, unauthorized
+from app.errors import ApiError, forbidden, unauthorized
 from app.logs import actor_var
 from app.security import decode_access_token
 
@@ -44,6 +45,9 @@ def require(module: str, write: bool = False):
     async def checker(admin: CurrentAdmin) -> models.AdminUser:
         if AdminRole(admin.role) not in allowed:
             raise forbidden()
+        if write and module.startswith("billing") and get_settings().billing_mfa_required and not admin.mfa_enabled:
+            raise ApiError(403, "MFA_REQUIRED",
+                           "Para operar pagos tu cuenta debe tener activado el segundo factor (2FA).")
         return admin
 
     return Depends(checker)

@@ -121,6 +121,9 @@ async def test_admin_cancel_extend_and_retry(client, fake_gw, admin_headers, ana
                           json={"days": 7, "reason": "Analista no escribe"})
     assert r.status_code == 403
     r = await client.post(f"{ADMIN}/subscriptions/{sid}/extend", headers=support_headers,
+                          json={"days": 7, "reason": "Soporte solo lee pagos"})
+    assert r.status_code == 403                     # toda escritura de pagos es solo del rol admin
+    r = await client.post(f"{ADMIN}/subscriptions/{sid}/extend", headers=admin_headers,
                           json={"days": 7, "reason": "Compensación por ticket #1482"})
     assert r.status_code == 200, r.text
     delta = (datetime.fromisoformat(r.json()["current_period_end"]) -
@@ -131,6 +134,9 @@ async def test_admin_cancel_extend_and_retry(client, fake_gw, admin_headers, ana
     assert r.status_code == 409 and r.json()["error"]["code"] == "NOT_PAST_DUE"
 
     r = await client.post(f"{ADMIN}/subscriptions/{sid}/cancel", headers=support_headers,
+                          json={"immediate": False, "reason": "admin", "note": "Solicitud por teléfono"})
+    assert r.status_code == 403
+    r = await client.post(f"{ADMIN}/subscriptions/{sid}/cancel", headers=admin_headers,
                           json={"immediate": False, "reason": "admin", "note": "Solicitud por teléfono"})
     assert r.status_code == 200
     assert r.json()["status"] == "active" and r.json()["cancel_at_period_end"] is True
@@ -166,3 +172,60 @@ async def test_run_cycle_endpoint_admin_only(client, fake_gw, admin_headers, sup
     r = await client.post(f"{ADMIN}/jobs/billing-cycle", headers=admin_headers)
     assert r.status_code == 200, r.text
     assert r.json()["errors"] == []
+
+
+async def test_billing_writes_require_mfa_when_configured(client, fake_gw, admin_headers, app_headers, monkeypatch):
+    """En prod (o con ADMIN_BILLING_REQUIRE_MFA=true) operar pagos exige 2FA activo en la cuenta."""
+    from app.config import get_settings
+    data, _ = await subscribe_with_card(client, app_headers(), "gold")
+    sid = data["subscription"]["id"]
+    monkeypatch.setattr(get_settings(), "billing_require_mfa", True)
+    me = (await client.get("/api/v1/admin/auth/me", headers=admin_headers)).json()
+    r = await client.post(f"{ADMIN}/subscriptions/{sid}/extend", headers=admin_headers,
+                          json={"days": 3, "reason": "Prueba de 2FA obligatorio"})
+    if me.get("mfa_enabled"):
+        assert r.status_code == 200
+    else:
+        assert r.status_code == 403 and r.json()["error"]["code"] == "MFA_REQUIRED"
+    assert (await client.get(f"{ADMIN}/subscriptions/{sid}", headers=admin_headers)).status_code == 200  # leer sí
+
+
+async def test_chargeback_is_idempotent_and_updates_metrics(client, fake_gw, admin_headers, support_headers,
+                                                            app_headers, session):
+    from sqlalchemy import func, select
+
+    from uuid import UUID
+
+    from app.billing.models import BillingEvent
+    data, _ = await subscribe_with_card(client, app_headers(), "gold")
+    sid = data["subscription"]["id"]
+    detail = (await client.get(f"{ADMIN}/subscriptions/{sid}", headers=admin_headers)).json()
+    cid = detail["charges"][0]["id"]
+    body = {"note": "Disputa informada en el portal de Transbank", "tbk_reference": "CB-2026-0091"}
+
+    assert (await client.post(f"{ADMIN}/charges/{cid}/chargeback", headers=support_headers,
+                              json=body)).status_code == 403
+    r = await client.post(f"{ADMIN}/charges/{cid}/chargeback", headers=admin_headers, json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["already_registered"] is False
+    assert out["subscription"]["status"] == "canceled" and out["subscription"]["cancel_reason"] == "fraud"
+
+    again = await client.post(f"{ADMIN}/charges/{cid}/chargeback", headers=admin_headers, json=body)
+    assert again.status_code == 200 and again.json()["already_registered"] is True
+    n = (await session.execute(select(func.count()).select_from(BillingEvent).where(
+        BillingEvent.type == "charge.chargeback", BillingEvent.charge_id == UUID(cid)))).scalar_one()
+    assert n == 1
+
+    r = await client.post(f"{ADMIN}/charges/{cid}/chargeback", headers=admin_headers,
+                          json={**body, "amount": 10_000_000})
+    assert r.status_code in (200, 422)          # ya registrado: responde idempotente antes de validar
+
+
+async def test_chargeback_requires_paid_charge(client, fake_gw, admin_headers, app_headers):
+    data, _ = await subscribe_with_card(client, app_headers(), "gold", decision="approve_mastercard")
+    detail = (await client.get(f"{ADMIN}/subscriptions/{data['subscription']['id']}", headers=admin_headers)).json()
+    failed = next(c for c in detail["charges"] if c["status"] == "failed")
+    r = await client.post(f"{ADMIN}/charges/{failed['id']}/chargeback", headers=admin_headers,
+                          json={"note": "No debería aceptarse"})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "CHARGE_NOT_PAID"

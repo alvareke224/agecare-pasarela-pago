@@ -13,6 +13,7 @@ from typing import Any
 APP_AUTH = [(401, "UNAUTHORIZED", "Falta el JWT de la app, es inválido o expiró.")]
 ADMIN_AUTH = [(401, "UNAUTHORIZED", "Falta el token de la consola o expiró."),
               (403, "FORBIDDEN", "El rol del usuario no tiene permiso sobre este módulo.")]
+MFA = [(403, "MFA_REQUIRED", "La cuenta no tiene 2FA activo y el ambiente lo exige (prod).")]
 VALIDATION = [(422, "VALIDATION_ERROR", "Algún parámetro o campo del cuerpo no cumple su tipo o rango.")]
 TBK_DOWN = [(502, "PAYMENT_PROVIDER_UNAVAILABLE", "Transbank no respondió al iniciar la inscripción.")]
 SUB_NOT_FOUND_APP = [(404, "NOT_FOUND", "La suscripción no existe o no pertenece al usuario.")]
@@ -24,7 +25,7 @@ BENEFICIARY = [
 ]
 
 READ_ROLES = "Consola · admin, analyst, support"
-WRITE_ROLES = "Consola · admin, support"
+WRITE_ROLES = "Consola · admin"
 REFUND_ROLES = "Consola · admin"
 APP = "App · JWT de usuario (Bearer)"
 
@@ -99,18 +100,18 @@ ENDPOINTS: dict[tuple[str, str], dict[str, Any]] = {
         "auth": READ_ROLES, "errors": ADMIN_AUTH + SUB_NOT_FOUND_ADMIN},
     ("POST", "/api/v1/admin/billing/subscriptions/{sub_id}/cancel"): {
         "summary": "Cancelar una suscripción desde la consola (inmediata o al fin del periodo)",
-        "auth": WRITE_ROLES, "errors": ADMIN_AUTH + VALIDATION + SUB_NOT_FOUND_ADMIN + [
+        "auth": WRITE_ROLES, "errors": ADMIN_AUTH + MFA + VALIDATION + SUB_NOT_FOUND_ADMIN + [
             (409, "INVALID_TRANSITION", "La suscripción ya terminó o no admite cancelación programada.")]},
     ("POST", "/api/v1/admin/billing/subscriptions/{sub_id}/retry-charge"): {
         "summary": "Reintentar ahora el cobro de una suscripción en mora",
-        "auth": WRITE_ROLES, "errors": ADMIN_AUTH + SUB_NOT_FOUND_ADMIN + [
+        "auth": WRITE_ROLES, "errors": ADMIN_AUTH + MFA + SUB_NOT_FOUND_ADMIN + [
             (409, "NOT_PAST_DUE", "La suscripción no está en mora."),
             (409, "CHARGE_IN_PROGRESS", "Ya hay un cobro en curso."),
             (409, "NO_PAYMENT_METHOD", "No tiene una tarjeta activa."),
         ]},
     ("POST", "/api/v1/admin/billing/subscriptions/{sub_id}/extend"): {
         "summary": "Extender el periodo pagado sin cobrar (compensación)",
-        "auth": WRITE_ROLES, "errors": ADMIN_AUTH + VALIDATION + SUB_NOT_FOUND_ADMIN + [
+        "auth": WRITE_ROLES, "errors": ADMIN_AUTH + MFA + VALIDATION + SUB_NOT_FOUND_ADMIN + [
             (409, "INVALID_TRANSITION", "Solo se extienden suscripciones activas.")]},
     ("GET", "/api/v1/admin/billing/charges"): {
         "summary": "Buscar y filtrar cobros (paginado)",
@@ -121,19 +122,26 @@ ENDPOINTS: dict[tuple[str, str], dict[str, Any]] = {
         "auth": READ_ROLES, "errors": ADMIN_AUTH + [(404, "NOT_FOUND", "El cobro no existe.")]},
     ("POST", "/api/v1/admin/billing/charges/{charge_id}/refunds"): {
         "summary": "Reembolsar total o parcialmente un cobro aprobado",
-        "auth": REFUND_ROLES, "errors": ADMIN_AUTH + VALIDATION + [
+        "auth": REFUND_ROLES, "errors": ADMIN_AUTH + MFA + VALIDATION + [
             (404, "NOT_FOUND", "El cobro no existe."),
             (409, "CHARGE_NOT_REFUNDABLE", "El cobro no está aprobado (o ya se reembolsó entero)."),
             (422, "REFUND_EXCEEDS_CHARGE", "El monto supera lo que queda por reembolsar."),
             (502, "REFUND_REJECTED", "Transbank rechazó el reembolso."),
             (504, "REFUND_UNCONFIRMED", "Transbank no respondió; hay que verificar antes de reintentar."),
         ]},
+    ("POST", "/api/v1/admin/billing/charges/{charge_id}/chargeback"): {
+        "summary": "Registrar un contracargo informado por Transbank (idempotente)",
+        "auth": REFUND_ROLES, "errors": ADMIN_AUTH + MFA + VALIDATION + [
+            (404, "NOT_FOUND", "El cobro no existe."),
+            (409, "CHARGE_NOT_PAID", "El cobro no fue aprobado."),
+            (422, "CHARGEBACK_EXCEEDS_CHARGE", "El monto disputado supera lo cobrado."),
+        ]},
     ("POST", "/api/v1/admin/billing/jobs/billing-cycle"): {
         "summary": "Ejecutar ahora el ciclo de facturación",
-        "auth": REFUND_ROLES, "errors": ADMIN_AUTH},
+        "auth": REFUND_ROLES, "errors": ADMIN_AUTH + MFA},
     ("POST", "/api/v1/admin/billing/dev/app-token"): {
         "summary": "Crear un usuario de prueba de la app (solo dev/staging)",
-        "auth": WRITE_ROLES, "errors": ADMIN_AUTH + [
+        "auth": WRITE_ROLES, "errors": ADMIN_AUTH + MFA + [
             (404, "NOT_FOUND", "Deshabilitado con ADMIN_ENVIRONMENT=prod.")]},
 }
 

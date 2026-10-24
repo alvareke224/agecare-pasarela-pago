@@ -24,10 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.billing.enums import (CancelReason, ChargeKind, ChargeStatus, PaymentMethodStatus,
                                SubscriptionStatus)
 from app.billing.gateway import PaymentGateway
-from app.logs import log_event
+from app.billing.metrics_sync import sync_commercial_metrics
 from app.billing.models import Charge, PaymentMethod, Subscription
 from app.billing.service import BillingService
 from app.errors import ApiError
+from app.logs import log_event
 
 log = logging.getLogger("agecare.billing.jobs")
 MAX_PER_RUN = 500
@@ -43,6 +44,8 @@ class CycleStats:
     canceled: int = 0
     expired_subscriptions: int = 0
     expired_inscriptions: int = 0
+    paying_units: int = 0      # conciliación con el dashboard comercial
+    mrr_clp: int = 0
     errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
@@ -114,6 +117,16 @@ async def run_billing_cycle(db: AsyncSession, gateway: PaymentGateway, now=None)
             await db.rollback()
             stats.errors.append(f"subscription {sub.id}: {exc}")
             log.exception("Error procesando la suscripción %s", sub.id)
+
+    # 5 · Métricas comerciales con datos reales (metrics_plan_snapshot y metrics_daily_users)
+    try:
+        synced = await sync_commercial_metrics(db, now=now)
+        await db.commit()
+        stats.paying_units, stats.mrr_clp = synced.paying_units, synced.mrr_clp
+    except Exception as exc:  # noqa: BLE001
+        await db.rollback()
+        stats.errors.append(f"metrics_sync: {exc}")
+        log.exception("Error conciliando las métricas comerciales")
     log_event(log, "job.billing_cycle", "Ciclo de facturación terminado",
               logging.ERROR if stats.errors else logging.INFO,
               duration_ms=round((time.perf_counter() - started) * 1000, 1), **stats.as_dict())

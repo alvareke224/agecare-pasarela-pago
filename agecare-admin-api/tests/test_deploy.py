@@ -74,4 +74,5 @@ async def test_dev_app_token_for_testers(client, fake_gw, admin_headers, analyst
     r = await client.post(f"{BILLING}/subscriptions", headers=h, json={"plan_code": "provider"})
     assert r.status_code == 201
     monkeypatch.setattr(get_settings(), "environment", "prod")
+    monkeypatch.setattr(get_settings(), "billing_require_mfa", False)   # aislar la regla «no existe en prod»
     assert (await client.post(url, headers=admin_headers)).status_code == 404

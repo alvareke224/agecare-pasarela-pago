@@ -314,6 +314,8 @@ class CycleOut(BaseModel):
     canceled: int
     expired_subscriptions: int
     expired_inscriptions: int
+    paying_units: int = Field(description="Unidades que pagan según la facturación (llevadas al dashboard comercial).")
+    mrr_clp: int = Field(description="MRR real en CLP (llevado al dashboard comercial).")
     errors: list[str]
 
 
@@ -325,3 +327,18 @@ class DevAppTokenOut(BaseModel):
     family_id: UUID = Field(description="Familia propia del usuario (para probar Platino).")
     provider_id: UUID = Field(description="Perfil de proveedor propio (para probar el plan Proveedor).")
 
+
+class ChargebackIn(BaseModel):
+    """Contracargo informado por Transbank (portal de comercios / correo de disputas)."""
+    note: str = Field(min_length=5, max_length=500, description="Detalle del contracargo (queda en la auditoría).")
+    tbk_reference: str | None = Field(default=None, max_length=60,
+                                      description="N.° de disputa o referencia que entrega Transbank.")
+    amount: int | None = Field(default=None, gt=0, description="Monto disputado en CLP; por defecto, el del cobro.")
+    cancel_subscription: bool = Field(default=True, description="Cancela de inmediato la suscripción (motivo fraude).")
+
+
+class ChargebackOut(BaseModel):
+    charge_id: UUID
+    amount: int
+    already_registered: bool = Field(description="true si el contracargo ya estaba registrado (llamada repetida).")
+    subscription: "AdminSubscriptionOut"

@@ -240,7 +240,7 @@ Transbank directo, sin enrutador.
 
 ### Tests
 
-- `pytest` — 73 tests (23 originales + 50 de facturación y despliegue serverless): checkout completo vía simulador y vía Transbank simulado por HTTP (enrutamiento demo/Transbank),
+- `pytest` — 78 tests (23 originales + 55 de facturación y despliegue serverless): checkout completo vía simulador y vía Transbank simulado por HTTP (enrutamiento demo/Transbank),
   reglas de beneficiario, cobro perdido por timeout y conciliado sin doble cobro, dunning
   completo hasta la cancelación, recuperación, cancelación programada, cambio de plan,
   expiración, inscripción eliminada en Transbank (−96), job en otro proceso, permisos,

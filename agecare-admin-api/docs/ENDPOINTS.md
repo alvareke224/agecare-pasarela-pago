@@ -38,14 +38,15 @@
 | `POST` | [`/api/v1/billing/subscriptions/{sub_id}/resume`](#post--api-v1-billing-subscriptions-sub-id-resume) | Deshacer una cancelación programada | App · JWT de usuario (Bearer) |
 | `GET` | [`/api/v1/admin/billing/charges`](#get--api-v1-admin-billing-charges) | Buscar y filtrar cobros (paginado) | Consola · admin, analyst, support |
 | `GET` | [`/api/v1/admin/billing/charges/{charge_id}`](#get--api-v1-admin-billing-charges-charge-id) | Detalle de un cobro con reembolsos y respuesta de Transbank | Consola · admin, analyst, support |
+| `POST` | [`/api/v1/admin/billing/charges/{charge_id}/chargeback`](#post--api-v1-admin-billing-charges-charge-id-chargeback) | Registrar un contracargo informado por Transbank (idempotente) | Consola · admin |
 | `POST` | [`/api/v1/admin/billing/charges/{charge_id}/refunds`](#post--api-v1-admin-billing-charges-charge-id-refunds) | Reembolsar total o parcialmente un cobro aprobado | Consola · admin |
-| `POST` | [`/api/v1/admin/billing/dev/app-token`](#post--api-v1-admin-billing-dev-app-token) | Crear un usuario de prueba de la app (solo dev/staging) | Consola · admin, support |
+| `POST` | [`/api/v1/admin/billing/dev/app-token`](#post--api-v1-admin-billing-dev-app-token) | Crear un usuario de prueba de la app (solo dev/staging) | Consola · admin |
 | `POST` | [`/api/v1/admin/billing/jobs/billing-cycle`](#post--api-v1-admin-billing-jobs-billing-cycle) | Ejecutar ahora el ciclo de facturación | Consola · admin |
 | `GET` | [`/api/v1/admin/billing/subscriptions`](#get--api-v1-admin-billing-subscriptions) | Buscar y filtrar suscripciones (paginado) | Consola · admin, analyst, support |
 | `GET` | [`/api/v1/admin/billing/subscriptions/{sub_id}`](#get--api-v1-admin-billing-subscriptions-sub-id) | Detalle de una suscripción con sus cobros y eventos | Consola · admin, analyst, support |
-| `POST` | [`/api/v1/admin/billing/subscriptions/{sub_id}/cancel`](#post--api-v1-admin-billing-subscriptions-sub-id-cancel) | Cancelar una suscripción desde la consola (inmediata o al fin del periodo) | Consola · admin, support |
-| `POST` | [`/api/v1/admin/billing/subscriptions/{sub_id}/extend`](#post--api-v1-admin-billing-subscriptions-sub-id-extend) | Extender el periodo pagado sin cobrar (compensación) | Consola · admin, support |
-| `POST` | [`/api/v1/admin/billing/subscriptions/{sub_id}/retry-charge`](#post--api-v1-admin-billing-subscriptions-sub-id-retry-charge) | Reintentar ahora el cobro de una suscripción en mora | Consola · admin, support |
+| `POST` | [`/api/v1/admin/billing/subscriptions/{sub_id}/cancel`](#post--api-v1-admin-billing-subscriptions-sub-id-cancel) | Cancelar una suscripción desde la consola (inmediata o al fin del periodo) | Consola · admin |
+| `POST` | [`/api/v1/admin/billing/subscriptions/{sub_id}/extend`](#post--api-v1-admin-billing-subscriptions-sub-id-extend) | Extender el periodo pagado sin cobrar (compensación) | Consola · admin |
+| `POST` | [`/api/v1/admin/billing/subscriptions/{sub_id}/retry-charge`](#post--api-v1-admin-billing-subscriptions-sub-id-retry-charge) | Reintentar ahora el cobro de una suscripción en mora | Consola · admin |
 | `GET` | [`/api/v1/admin/billing/summary`](#get--api-v1-admin-billing-summary) | KPIs de facturación (MRR, activas, mora, aprobación, ingresos) | Consola · admin, analyst, support |
 | `GET` | [`/api/v1/billing/internal/cron/billing-cycle`](#get--api-v1-billing-internal-cron-billing-cycle) | Ciclo de facturación invocado por Vercel Cron | Authorization: Bearer CRON_SECRET |
 
@@ -329,6 +330,42 @@
 | 403 | `FORBIDDEN` | El rol del usuario no tiene permiso sobre este módulo. |
 | 404 | `NOT_FOUND` | El cobro no existe. |
 
+### POST /api/v1/admin/billing/charges/{charge_id}/chargeback
+
+**Registrar un contracargo informado por Transbank (idempotente).**
+
+- **Acceso:** Consola · admin
+- **Detalle:** Registra un contracargo informado por Transbank. Idempotente: repetirlo no duplica nada.  Transbank no notifica contracargos por API (no hay webhooks en Webpay/Oneclick): llegan por el portal de comercios. Este endpoint los incorpora: deja el evento `charge.chargeback`, cancela la suscripción (motivo fraude) y recalcula las métricas comerciales.
+
+**Parámetros**
+
+| Nombre | En | Tipo | Obligatorio | Descripción / reglas |
+|---|---|---|---|---|
+| `charge_id` | path | uuid | sí |  |
+
+**Cuerpo** (`application/json`, ChargebackIn)
+
+| Campo | Tipo | Obligatorio | Descripción / reglas |
+|---|---|---|---|
+| `note` | string | sí | Detalle del contracargo (queda en la auditoría). largo ≥ 5, largo ≤ 500 |
+| `tbk_reference` | string \| null | no | N.° de disputa o referencia que entrega Transbank. largo ≤ 60 |
+| `amount` | integer \| null | no | Monto disputado en CLP; por defecto, el del cobro. > 0 |
+| `cancel_subscription` | boolean | no | Cancela de inmediato la suscripción (motivo fraude). por defecto `true` |
+
+**Respuesta 200:** [ChargebackOut](#chargebackout)
+
+**Errores**
+
+| HTTP | code | Cuándo |
+|---|---|---|
+| 401 | `UNAUTHORIZED` | Falta el token de la consola o expiró. |
+| 403 | `FORBIDDEN` | El rol del usuario no tiene permiso sobre este módulo. |
+| 403 | `MFA_REQUIRED` | La cuenta no tiene 2FA activo y el ambiente lo exige (prod). |
+| 404 | `NOT_FOUND` | El cobro no existe. |
+| 409 | `CHARGE_NOT_PAID` | El cobro no fue aprobado. |
+| 422 | `VALIDATION_ERROR` | Algún parámetro o campo del cuerpo no cumple su tipo o rango. |
+| 422 | `CHARGEBACK_EXCEEDS_CHARGE` | El monto disputado supera lo cobrado. |
+
 ### POST /api/v1/admin/billing/charges/{charge_id}/refunds
 
 **Reembolsar total o parcialmente un cobro aprobado.**
@@ -356,6 +393,7 @@
 |---|---|---|
 | 401 | `UNAUTHORIZED` | Falta el token de la consola o expiró. |
 | 403 | `FORBIDDEN` | El rol del usuario no tiene permiso sobre este módulo. |
+| 403 | `MFA_REQUIRED` | La cuenta no tiene 2FA activo y el ambiente lo exige (prod). |
 | 404 | `NOT_FOUND` | El cobro no existe. |
 | 409 | `CHARGE_NOT_REFUNDABLE` | El cobro no está aprobado (o ya se reembolsó entero). |
 | 422 | `VALIDATION_ERROR` | Algún parámetro o campo del cuerpo no cumple su tipo o rango. |
@@ -367,7 +405,7 @@
 
 **Crear un usuario de prueba de la app (solo dev/staging).**
 
-- **Acceso:** Consola · admin, support
+- **Acceso:** Consola · admin
 - **Detalle:** Emite un JWT de usuario de la app para el *Checkout de prueba* (demos en Vercel, QA).  Crea un usuario ficticio nuevo con una familia y un proveedor propios, así se pueden probar los tres planes. Deshabilitado en producción (ADMIN_ENVIRONMENT=prod).
 
 **Respuesta 200:** [DevAppTokenOut](#devapptokenout)
@@ -378,6 +416,7 @@
 |---|---|---|
 | 401 | `UNAUTHORIZED` | Falta el token de la consola o expiró. |
 | 403 | `FORBIDDEN` | El rol del usuario no tiene permiso sobre este módulo. |
+| 403 | `MFA_REQUIRED` | La cuenta no tiene 2FA activo y el ambiente lo exige (prod). |
 | 404 | `NOT_FOUND` | Deshabilitado con ADMIN_ENVIRONMENT=prod. |
 
 ### POST /api/v1/admin/billing/jobs/billing-cycle
@@ -395,6 +434,7 @@
 |---|---|---|
 | 401 | `UNAUTHORIZED` | Falta el token de la consola o expiró. |
 | 403 | `FORBIDDEN` | El rol del usuario no tiene permiso sobre este módulo. |
+| 403 | `MFA_REQUIRED` | La cuenta no tiene 2FA activo y el ambiente lo exige (prod). |
 
 ### GET /api/v1/admin/billing/subscriptions
 
@@ -451,7 +491,7 @@
 
 **Cancelar una suscripción desde la consola (inmediata o al fin del periodo).**
 
-- **Acceso:** Consola · admin, support
+- **Acceso:** Consola · admin
 
 **Parámetros**
 
@@ -475,6 +515,7 @@
 |---|---|---|
 | 401 | `UNAUTHORIZED` | Falta el token de la consola o expiró. |
 | 403 | `FORBIDDEN` | El rol del usuario no tiene permiso sobre este módulo. |
+| 403 | `MFA_REQUIRED` | La cuenta no tiene 2FA activo y el ambiente lo exige (prod). |
 | 404 | `NOT_FOUND` | La suscripción no existe. |
 | 409 | `INVALID_TRANSITION` | La suscripción ya terminó o no admite cancelación programada. |
 | 422 | `VALIDATION_ERROR` | Algún parámetro o campo del cuerpo no cumple su tipo o rango. |
@@ -483,7 +524,7 @@
 
 **Extender el periodo pagado sin cobrar (compensación).**
 
-- **Acceso:** Consola · admin, support
+- **Acceso:** Consola · admin
 - **Detalle:** Extiende el periodo pagado sin cobro (compensación de soporte).
 
 **Parámetros**
@@ -507,6 +548,7 @@
 |---|---|---|
 | 401 | `UNAUTHORIZED` | Falta el token de la consola o expiró. |
 | 403 | `FORBIDDEN` | El rol del usuario no tiene permiso sobre este módulo. |
+| 403 | `MFA_REQUIRED` | La cuenta no tiene 2FA activo y el ambiente lo exige (prod). |
 | 404 | `NOT_FOUND` | La suscripción no existe. |
 | 409 | `INVALID_TRANSITION` | Solo se extienden suscripciones activas. |
 | 422 | `VALIDATION_ERROR` | Algún parámetro o campo del cuerpo no cumple su tipo o rango. |
@@ -515,7 +557,7 @@
 
 **Reintentar ahora el cobro de una suscripción en mora.**
 
-- **Acceso:** Consola · admin, support
+- **Acceso:** Consola · admin
 - **Detalle:** Reintenta ya el cobro de una suscripción en mora (no consume un reintento programado).
 
 **Parámetros**
@@ -532,6 +574,7 @@
 |---|---|---|
 | 401 | `UNAUTHORIZED` | Falta el token de la consola o expiró. |
 | 403 | `FORBIDDEN` | El rol del usuario no tiene permiso sobre este módulo. |
+| 403 | `MFA_REQUIRED` | La cuenta no tiene 2FA activo y el ambiente lo exige (prod). |
 | 404 | `NOT_FOUND` | La suscripción no existe. |
 | 409 | `NOT_PAST_DUE` | La suscripción no está en mora. |
 | 409 | `CHARGE_IN_PROGRESS` | Ya hay un cobro en curso. |
@@ -704,6 +747,15 @@
 | `refunded` | integer | sí |  |
 | `net_revenue` | integer | sí |  |
 
+### ChargebackOut
+
+| Campo | Tipo | Obligatorio | Descripción / reglas |
+|---|---|---|---|
+| `charge_id` | uuid | sí |  |
+| `amount` | integer | sí |  |
+| `already_registered` | boolean | sí | true si el contracargo ya estaba registrado (llamada repetida) |
+| `subscription` | [AdminSubscriptionOut](#adminsubscriptionout) | sí |  |
+
 ### CycleOut
 
 | Campo | Tipo | Obligatorio | Descripción / reglas |
@@ -716,6 +768,8 @@
 | `canceled` | integer | sí |  |
 | `expired_subscriptions` | integer | sí |  |
 | `expired_inscriptions` | integer | sí |  |
+| `paying_units` | integer | sí | Unidades que pagan según la facturación (llevadas al dashboard comercial) |
+| `mrr_clp` | integer | sí | MRR real en CLP (llevado al dashboard comercial) |
 | `errors` | array<string> | sí |  |
 
 ### DevAppTokenOut

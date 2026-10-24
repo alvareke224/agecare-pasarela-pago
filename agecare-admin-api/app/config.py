@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     # ---- Pasarela de pago y suscripciones (app/billing) ----
     # fake = simulador local de Webpay (dev/tests) · transbank = Oneclick Mall real
     billing_gateway: str = "fake"
+    # 2FA obligatorio para operar pagos (escrituras). Por defecto: solo en prod (staging lo usan testers sin TOTP)
+    billing_require_mfa: bool | None = None
     billing_currency: str = "CLP"
     # Llave Fernet para cifrar tbk_user (Key Vault en Azure). Obligatoria fuera de dev.
     billing_encryption_key: str = ""
@@ -97,6 +99,10 @@ class Settings(BaseSettings):
     def tbk_base_url(self) -> str:
         return ("https://webpay3g.transbank.cl" if self.tbk_environment == "production"
                 else "https://webpay3gint.transbank.cl")
+
+    @property
+    def billing_mfa_required(self) -> bool:
+        return self.environment == "prod" if self.billing_require_mfa is None else self.billing_require_mfa
 
     def validate_billing(self) -> None:
         """Evita desplegar a producción con credenciales de integración o sin cifrado."""
